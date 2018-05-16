@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:mllp="http://www.mulesoft.org/schema/mule/mllp" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:mongo="http://www.mulesoft.org/schema/mule/mongo" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:x12-edi="http://www.mulesoft.org/schema/mule/x12-edi" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:hl7-edi="http://www.mulesoft.org/schema/mule/hl7-edi" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/hl7-edi http://www.mulesoft.org/schema/mule/hl7-edi/current/mule-hl7-edi.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/x12-edi http://www.mulesoft.org/schema/mule/x12-edi/current/mule-x12-edi.xsd
+http://www.mulesoft.org/schema/mule/mongo http://www.mulesoft.org/schema/mule/mongo/current/mule-mongo.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/mllp http://www.mulesoft.org/schema/mule/mllp/current/mule-mllp.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd">
+    <hl7-edi:config name="HL7_EDI__Configuration" doc:name="HL7 EDI: Configuration">
+        <hl7-edi:schemas>
+            <hl7-edi:schema>${app.home}/schemas/hl7/ADT_A01.esl</hl7-edi:schema>
+        </hl7-edi:schemas>
+    </hl7-edi:config>
+    <x12-edi:config name="X12_EDI" doc:name="X12 EDI" groupIdPartner="${x12.groupid.partner}" groupIdSelf="${x12.groupid.self}" interchangeIdPartner="${x12.interchange.partner}" interchangeIdQualifierPartner="${x12.id.qualifier.partner}" interchangeIdQualifierSelf="${x12.id.qualifier.self}" interchangeIdSelf="${x12.interchange.self}"  reportSegmentErrors="false"      >
+        <x12-edi:schemas>
+            <x12-edi:schema>${app.home}/schemas/edi/hipaa.837.esl</x12-edi:schema>
+            <!-- <x12-edi:schema>${app.home}/schemas/edi/x12.837.esl</x12-edi:schema>  -->
+        </x12-edi:schemas>
+    </x12-edi:config>
+    <mongo:config name="Mongo_DB" username="mule" password="" database="sentry-data" host="ds119820.mlab.com:19820" doc:name="Mongo DB"/>
+    <flow name="ingest-pharmacy-changes-csv">
+        <file:inbound-endpoint path="src/main/resources/pharmacy" moveToDirectory="src/main/resources/processed" responseTimeout="10000" doc:name="File"/>
+        <logger level="INFO" doc:name="Logger"/>
+        <dw:transform-message doc:name="Transform Message" metadata:id="2968adb5-0121-47aa-a81d-d8ad5c8e507b">
+            <dw:input-payload doc:sample="changes.csv" mimeType="application/csv">
+                <dw:reader-property name="separator" value="|"/>
+            </dw:input-payload>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+
+%function pad(str) str as :number as :string {format: "00000000"}
+---
+payload map {
+	Account: pad($."Account #"),
+	Processed: 0,
+	Type: "csv",
+	Record: $
+}]]></dw:set-payload>
+        </dw:transform-message>
+        <foreach doc:name="For Each">
+            <logger level="INFO" doc:name="Logger"/>
+            <mongo:insert-document config-ref="Mongo_DB" collection="database" doc:name="Insert pharmacy document"/>
+        </foreach>
+    </flow>
+    <flow name="ingest-x12-edi">
+        <file:inbound-endpoint path="src/main/resources/edi" moveToDirectory="src/main/resources/processed" responseTimeout="10000" doc:name="File"/>
+        <logger level="INFO" doc:name="Logger"/>
+        <x12-edi:read config-ref="X12_EDI" doc:name="X12 EDI"/>
+        <dw:transform-message doc:name="Transform Message">
+            <dw:input-payload doc:sample="sample_data/InMessage.dwl"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+
+%function pad(str) str as :number as :string {format: "00000000"}
+---
+{
+	Account: pad(payload.TransactionSets.v005010X222A2['837'][0].Detail."2000_Loop"[2]."2300_Loop"[0]."1300_CLM".CLM01),
+	Processed: 0,
+	Type: "edi",
+	Record: payload.TransactionSets.v005010X222A2['837'][0]
+}]]></dw:set-payload>
+        </dw:transform-message>
+        <mongo:insert-document config-ref="Mongo_DB" collection="database" doc:name="Insert X12 document"/>
+    </flow>
+    <flow name="ingest-hl7-mllp">
+        <mllp:inbound-endpoint host="localhost" port="5000" responseTimeout="10000" exchange-pattern="request-response" doc:name="HL7 MLLP"/>
+        <vm:outbound-endpoint exchange-pattern="request-response" path="processHL7" doc:name="VM"/>
+    </flow>
+    <flow name="ingest-hl7-file">
+        <file:inbound-endpoint path="src/main/resources/hl7" moveToDirectory="src/main/resources/processed" responseTimeout="10000" doc:name="File"/>
+        <vm:outbound-endpoint exchange-pattern="request-response" path="processHL7" doc:name="VM"/>
+        <logger message="#[payload]" level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="ingest-hl7-process">
+        <vm:inbound-endpoint exchange-pattern="request-response" path="processHL7" doc:name="VM"/>
+        <hl7-edi:read config-ref="HL7_EDI__Configuration" doc:name="HL7 EDI"/>
+        <set-variable variableName="originalMessage" value="#[payload]" doc:name="Variable"/>
+        <choice doc:name="Choice">
+            <when expression="#[payload.MSH['MSH-04-01'] == 1]">
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+%function pad(str) str as :number as :string {format: "00000000"}
+---
+{
+	Account: pad(payload.Data."ADT_A01"."03_PID"['PID-18-01']),
+	Processed: 0,
+	Type: "hl7",
+	Record: payload
+}]]></dw:set-payload>
+                </dw:transform-message>
+                <mongo:insert-document config-ref="Mongo_DB" collection="database" doc:name="Insert HL7 document"/>
+            </when>
+            <otherwise>
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+%function pad(str) str as :number as :string {format: "00000000"}
+---
+{
+	Account: pad(payload.Data."ADT_A01"."03_PID"['PID-18-01']),
+	Processed: 0,
+	Type: "hl7",
+	Record: payload
+}]]></dw:set-payload>
+                </dw:transform-message>
+                <mongo:insert-document config-ref="Mongo_DB" collection="problem" doc:name="Insert HL7 document - problem"/>
+            </otherwise>
+        </choice>
+        <set-payload value="#[flowVars.originalMessage]" doc:name="Set Payload"/>
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+{
+	Name: "ACK",
+	MSH: payload.ACK."01_MSH",
+	Id: "ACK",
+	Data: {
+		ACK: payload.ACK
+	}
+}]]></dw:set-payload>
+        </dw:transform-message>
+        <hl7-edi:write config-ref="HL7_EDI__Configuration" messageStructure="OutMessage" doc:name="HL7 EDI"/>
+    </flow>
+</mule>

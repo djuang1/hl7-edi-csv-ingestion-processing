@@ -1,0 +1,5 @@
+MRN|Account #|Last Name|First Name|MID INIT|Status (Inp/Outpt)|CDM Code|Description|Charge Amount|Rev Code|CPT Code|HCPC Code|J Code|QTY|Service Date|Time|Post Date|Journal
+23423|26463774|Smith|Bobby|R|Inp|223423|Test|34.00|ABC|GHI|C|D|23|3/4/18|4:53|3/4/18|ZYX
+23423|3774|Smith|Joe|R|Outpt|223423|Test|34.00|ABC|GHI|C|D|23|3/4/18|4:53|3/4/18|ZYX
+23423|463774|Curtis|Joe|R|Inp|223423|Test|656564.00|ABC|GHI|C|D|23|3/4/18|4:53|3/4/18|ZYX
+23423|264634|Nelson|Joe|R|Inp|223423|Test|34.00|ABC|GHI|C|D|23|3/4/18|4:53|3/4/18|ZYX

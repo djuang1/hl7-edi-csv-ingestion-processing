@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:mongo="http://www.mulesoft.org/schema/mule/mongo" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/mongo http://www.mulesoft.org/schema/mule/mongo/current/mule-mongo.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+
+    <mongo:config name="Mongo_DB" username="mule" password="" database="sentry-data" host="ds119820.mlab.com:19820" doc:name="Mongo DB"/>
+
+    <flow name="sentry-data-processFlow">
+        <poll doc:name="Poll">
+            <fixed-frequency-scheduler frequency="2000"/>
+            <mongo:find-documents config-ref="Mongo_DB" doc:name="Get Unprocessed Documents" collection="database" query-ref="#['{Processed: 0}']"/>
+        </poll>
+        <foreach doc:name="For Each">
+            <set-variable variableName="Account" value="#[payload.Account]" doc:name="Account Number"/>
+            <logger message="#['{Account: &quot;' +  payload.Account + '&quot;,Processed: 0,Type: {$in: [&quot;edi&quot;, &quot;hl7&quot;,&quot;csv&quot;]}}']" level="INFO" doc:name="Logger"/>
+            <mongo:count-documents config-ref="Mongo_DB" collection="database" query-ref="#['{Account: &quot;' +  payload.Account + '&quot;,Processed: 0,Type: {$in: [&quot;edi&quot;, &quot;hl7&quot;,&quot;csv&quot;]}}']" doc:name="Get Documents that match Account"/>
+            <choice doc:name="Choice">
+                <when expression="#[payload == 3]">
+                    <mongo:update-documents-by-function config-ref="Mongo_DB" collection="database" function="$inc" element-ref="#['{Processed:1}']" query-ref="#['{Account: &quot;' +  flowVars.Account + '&quot;}']" doc:name="Update Documents"/>
+                    <logger message="Foo! - #[flowVars.Account]" level="INFO" doc:name="Logger"/>
+                </when>
+                <otherwise>
+                    <logger message="No Foo! - #[flowVars.Account]" level="INFO" doc:name="Logger"/>
+                </otherwise>
+            </choice>
+        </foreach>
+    </flow>
+</mule>
